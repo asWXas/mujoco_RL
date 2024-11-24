@@ -39,7 +39,8 @@ actuators = [
 sensors = [
     "accelerometer",
     "gyro",
-    "orientation"
+    "orientation",
+    "camera_sensor"
 ]
 #列表长度
 print(len(actuators))
@@ -84,6 +85,7 @@ async def get_data(data, model, start_idxs, dims):
         acc = sensor_data_list[0]  # 加速度
         gyro = sensor_data_list[1]  # 陀螺仪
         ori = sensor_data_list[2]  # 方向
+        # cam_data = sensor_data_list[3]  # 相机数据，如果有相机传感器的话
 
         # 目标参数
         aim_quat = torch.tensor([0.1, 0.2, 0.3, 0.4])
@@ -92,6 +94,7 @@ async def get_data(data, model, start_idxs, dims):
         aim_other = torch.zeros(5)
 
         # 找出所有张量的最大长度
+        # max_length = max(tensor.size(0) for tensor in [acc, gyro, ori,cam_data, aim_quat, aim_vel, aim_ang, aim_other])
         max_length = max(tensor.size(0) for tensor in [acc, gyro, ori, aim_quat, aim_vel, aim_ang, aim_other])
 
         # 对齐数据长度
