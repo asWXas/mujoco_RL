@@ -101,6 +101,7 @@ async def get_data(data, model, start_idxs, dims):
         acc = pad_to_length(acc, max_length)
         gyro = pad_to_length(gyro, max_length)
         ori = pad_to_length(ori, max_length)
+        
         aim_quat = pad_to_length(aim_quat, max_length)
         aim_vel = pad_to_length(aim_vel, max_length)
         aim_ang = pad_to_length(aim_ang, max_length)
