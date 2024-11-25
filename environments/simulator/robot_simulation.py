@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import os
 import sys
+import threading
 
 # 当前状态  加速度(dim=3)  陀螺仪(dim=3)  四元数(dim=4)
 # 目标参数  四元数(dim=4)  速度(dim=3)  角速度(dim=3)  其他参数(dim=5)
@@ -183,7 +184,7 @@ class RobotSimulation:
     
     def do_random_action(self):
         # 随机动作
-        actions = np.random.uniform(-1, 1, 12)
+        actions = np.random.uniform(-2, 2, 12)
         for actuator_id, torque in zip(self.actuator_ids, actions):
             self.d.ctrl[actuator_id] = torque
 
@@ -198,25 +199,25 @@ class RobotSimulation:
     #---------------------#
     def Simulate(self,render=False):
         self._get_state_()
-        if render:
-            with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
-                while viewer.is_running():
-                    step_start = time.time()
+        i=0
+        with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
+            while viewer.is_running():
+                step_start = time.time()
+                
 
-                    self.set_actuator_torque()
-                    
+                
+                mujoco.mj_step(self.m, self.d)
 
-                    mujoco.mj_step(self.m, self.d)
+                self._get_state_().to(self.device)
 
-                    self._get_state_().to(self.device)
+                with viewer.lock():
+                    viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = int(self.d.time % 2)
 
-                    with viewer.lock():
-                        viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = int(self.d.time % 2)
-
-                    viewer.sync()
-                    time_until_next_step = self.m.opt.timestep - (time.time() - step_start)
-                    if time_until_next_step > 0:
-                        time.sleep(time_until_next_step)  
+                viewer.sync()
+                time_until_next_step = self.m.opt.timestep - (time.time() - step_start)
+                if time_until_next_step > 0:
+                    time.sleep(time_until_next_step) 
+    
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -236,8 +237,12 @@ class PolicyNet(nn.Module):
         
     def forward(self, x):
         output = self.action_layers(x)
-        actions = torch.tanh(output)       
+        actions = F.softsign(output)       
         return actions[0]
+
+
+#创建定时器
+
 
 model=PolicyNet(64,12,device)
 model_path = "/home/wx/WorkSpeac/WorkSpeac/RL/rl/models/google_barkour_v0/scene.xml"
