@@ -33,8 +33,8 @@ class PolicyNet(nn.Module):
     def forward(self, x):
         x=x.float()
         output = self.action_layers(x)
-        actions = torch.tanh(output)             
-        return actions[0][0][0]
+        actions = F.softsign(output)             
+        return actions[0][0]
     
 # ----------------------------------- #
 # 构建价值网络--critic
