@@ -44,10 +44,10 @@ sensors = [
 
 
 class RobotSimulation:
-    def __init__(self, m,d,sensor_list, actuator_list,Model):
+    def __init__(self,xml_path,sensor_list, actuator_list,Model):
         
-        self.m=m
-        self.d=d
+        self.m= mujoco.MjModel.from_xml_path(xml_path)
+        self.d=mujoco.MjData(self.m)
         self.Model=Model
         
         #目标参数  速度，角速度，四元素
@@ -166,96 +166,40 @@ class RobotSimulation:
         self.sensor_start_idxs = start_idxs
         self.sensor_dims = dims
          
-    #---------------------#
-    # #工具函数
-    #-#
+    # #---------------------#
+    # # #工具函数
+    # #-#
 
-    def pad_to_length(self,tensor, target_length):
-        """对张量进行填充，使其长度达到 target_length"""
-        padding = target_length - tensor.size(0)
-        return torch.cat([tensor, torch.zeros(padding)], dim=0)
+    # def pad_to_length(self,tensor, target_length):
+    #     """对张量进行填充，使其长度达到 target_length"""
+    #     padding = target_length - tensor.size(0)
+    #     return torch.cat([tensor, torch.zeros(padding)], dim=0)
     
-
+    
     #---------------------#
     # #仿真
     #---------------------#
     def Simulate(self,render=False):
-        pass
+        with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
+             while viewer.is_running():
+                step_start = time.time()
+
+
+                mujoco.mj_step(self.m, self.d)
+
+
+                with viewer.lock():
+                    viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = int(self.d.time % 2)
+
+                viewer.sync()
+                time_until_next_step = self.m.opt.timestep - (time.time() - step_start)
+                if time_until_next_step > 0:
+                    time.sleep(time_until_next_step)  
 
 
 
-        
 
-model_path = "/home/wx/WorkSpeac/WorkSpeac/RL/rl/models/google_barkour_v0/barkour_v0.xml"
-m=mujoco.MjModel.from_xml_path(model_path)
-d=mujoco.MjData(m)
-robosim=RobotSimulation(m,d,sensors,actuators,Model=None)
+model_path = "/home/wx/WorkSpeac/WorkSpeac/RL/rl/models/google_barkour_v0/scene.xml"
+robosim=RobotSimulation(model_path,sensors,actuators,Model=None)
 robosim.set_trajectory(torch.tensor([1,0,0,0]),torch.tensor([0,0,0]),torch.tensor([0,0,0]))
 robosim.Simulate(render=True)
-
-
-
-
-
-
-
-
-#回报函数
-def reward_func(data, senser_data, action):
-    # 假设这里定义奖励函数
-    pass
-
-
-
-# import gymnasium as gym
-# import numpy as np
-# import torch
-# import torch.nn as nn
-
-
-# #继承gym.Env类，实现自己的环境
-# class GO1(gym.Env):
-#     """创建一个自定义的Gym环境GO1。"""
-#     def __init__(self, actions, sensors):
-#         """初始化GO1环境，设置动作空间，观察空间和初始状态。"""
-#         super(GO1, self).__init__()
-
-#         self.actio_dim = len(actions)
-#         self.obv_dim = len(sensors) + self.actio_dim
-        
-#         self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(self.actio_dim,), dtype=np.float32)
-#         self.observation_space = gym.spaces.Box(low=-100.0, high=100.0, shape=(self.obv_dim,), dtype=np.float32)
-        
-#         self.observation = None
-#         self.reward = None
-#         self.done = None
-#         self.info = None
-
-#     def step(self, action):
-#         """执行给定的动作，更新状态并返回下一个观察值、奖励、是否结束和额外信息。"""
-#         return self.observation, self.reward, self.done, self.info
-
-#     def reset(self):
-#         """重置环境状态并返回初始观察值。"""
-#         return np.zeros(self.obv_dim)  # 示例，实际应为环境重置后的初始状态
-
-#     def render(self, mode='human'):
-#         """渲染环境的可视化（当前未实现）。"""
-#         pass
-
-# #注册环境
-# gym.register(
-#     id='GO1-v0',
-#     entry_point='GO1:GO1',
-    
-#     max_episode_steps=1000,
-#     reward_threshold=1000.0
-# )
-# #验证环境
-# env = GO1(actions=actuators,sensors=sensors)
-# env.reset()
-# for i in range(1000):
-#     action = env.action_space.sample()
-#     observation, reward, done, info = env.step(action)
-#     if done:
-#         env.reset()
