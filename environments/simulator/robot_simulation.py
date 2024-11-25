@@ -185,7 +185,9 @@ class RobotSimulation:
                 step_start = time.time()
 
 
+
                 mujoco.mj_step(self.m, self.d)
+
 
 
                 with viewer.lock():
