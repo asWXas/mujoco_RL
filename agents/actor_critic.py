@@ -31,9 +31,10 @@ class PolicyNet(nn.Module):
         )
         
     def forward(self, x):
+        x=x.float()
         output = self.action_layers(x)
         actions = torch.tanh(output)             
-        return actions
+        return actions[0][0][0]
     
 # ----------------------------------- #
 # 构建价值网络--critic
@@ -50,6 +51,7 @@ class ValueNet(nn.Module):
         )
         
     def forward(self, x):
+        x=x.float()
         output = self.linear_layers(x)
         return output
     
