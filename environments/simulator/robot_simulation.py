@@ -3,7 +3,11 @@ import mujoco.viewer
 import torch 
 import numpy as np
 import time
-
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import os
+import sys
 
 # 当前状态  加速度(dim=3)  陀螺仪(dim=3)  四元数(dim=4)
 # 目标参数  四元数(dim=4)  速度(dim=3)  角速度(dim=3)  其他参数(dim=5)
@@ -44,17 +48,19 @@ sensors = [
 
 
 class RobotSimulation:
-    def __init__(self,xml_path,sensor_list, actuator_list,Model):
+    def __init__(self,xml_path,sensor_list, actuator_list,Model,device):
+        
+        self.device=device
         
         self.m= mujoco.MjModel.from_xml_path(xml_path)
         self.d=mujoco.MjData(self.m)
-        self.Model=Model
+        self.Model=Model.to(device)
         
         #目标参数  速度，角速度，四元素
-        self.quat = None
-        self.vel = None
-        self.ang_vel = None
-        self.other_params = None
+        self.quat = []
+        self.vel = []
+        self.ang_vel = []
+        self.other_params = []
 
         #传感器
         self.sensor_names = sensor_list
@@ -93,15 +99,20 @@ class RobotSimulation:
     def set_actuator_torque(self):
         try:
             # 设置执行器的力矩
-            actions = self.Model(self.state)[0][0][0]
-            #判断actions的长度是否为12,异常处理
-            if len(actions)!= 12:
+            state = self.state.float().to(self.device)  # 将状态移动到CUDA
+            actions = self.Model(state)  # 计算动作
+            print(actions)
+            # 判断actions的长度是否为12, 异常处理
+            if actions.size(0) != 12:
                 print("执行器力矩维度不正确")
                 return
+            
+            actions = actions.cpu()  # 如果需要将actions移回到CPU
             for actuator_id, torque in zip(self.actuator_ids, actions):
-                self.d.ctrl[actuator_id] = torque
+                self.d.ctrl[actuator_id] = torque.item()  # 取出标量值并赋值
         except Exception as e:
             print(f"设置执行器力矩时出现错误: {e}")
+
 
     #-------------------#
     # #设置目标参数
@@ -138,7 +149,7 @@ class RobotSimulation:
         state_a = torch.cat([acc, gyro, ori], dim=0)
         state_b = torch.cat([self.vel,self.ang_vel, self.quat], dim=0)
         # 状态合并
-        self.state = torch.stack([state_a, state_b], dim=0)
+        self.state = torch.stack([state_a, state_b], dim=0).to(self.device)
         
         return self.state
     
@@ -169,6 +180,12 @@ class RobotSimulation:
     # #---------------------#
     # # #工具函数
     # #-#
+    
+    def do_random_action(self):
+        # 随机动作
+        actions = np.random.uniform(-1, 1, 12)
+        for actuator_id, torque in zip(self.actuator_ids, actions):
+            self.d.ctrl[actuator_id] = torque
 
     # def pad_to_length(self,tensor, target_length):
     #     """对张量进行填充，使其长度达到 target_length"""
@@ -180,28 +197,50 @@ class RobotSimulation:
     # #仿真
     #---------------------#
     def Simulate(self,render=False):
-        with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
-             while viewer.is_running():
-                step_start = time.time()
+        self._get_state_()
+        if render:
+            with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
+                while viewer.is_running():
+                    step_start = time.time()
+
+                    self.set_actuator_torque()
+                    
+
+                    mujoco.mj_step(self.m, self.d)
+
+                    self._get_state_().to(self.device)
+
+                    with viewer.lock():
+                        viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = int(self.d.time % 2)
+
+                    viewer.sync()
+                    time_until_next_step = self.m.opt.timestep - (time.time() - step_start)
+                    if time_until_next_step > 0:
+                        time.sleep(time_until_next_step)  
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 
-                mujoco.mj_step(self.m, self.d)
+class PolicyNet(nn.Module):
+    def __init__(self,n_hiddens, output_dim,device):
+        super(PolicyNet, self).__init__()
+        self.action_layers =nn.Sequential(
+            nn.LazyLinear(n_hiddens,device=device),
+            nn.ELU(),
+            nn.Linear(n_hiddens, n_hiddens*2),
+            nn.ReLU(),
+            nn.Linear(n_hiddens*2, n_hiddens),
+            nn.Linear(n_hiddens, output_dim),
+        )
+        
+    def forward(self, x):
+        output = self.action_layers(x)
+        actions = torch.tanh(output)       
+        return actions[0]
 
-
-
-                with viewer.lock():
-                    viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = int(self.d.time % 2)
-
-                viewer.sync()
-                time_until_next_step = self.m.opt.timestep - (time.time() - step_start)
-                if time_until_next_step > 0:
-                    time.sleep(time_until_next_step)  
-
-
-
-
+model=PolicyNet(64,12,device)
 model_path = "/home/wx/WorkSpeac/WorkSpeac/RL/rl/models/google_barkour_v0/scene.xml"
-robosim=RobotSimulation(model_path,sensors,actuators,Model=None)
+robosim=RobotSimulation(model_path,sensors,actuators,Model=model,device=device)
 robosim.set_trajectory(torch.tensor([1,0,0,0]),torch.tensor([0,0,0]),torch.tensor([0,0,0]))
 robosim.Simulate(render=True)
