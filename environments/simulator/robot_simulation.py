@@ -20,7 +20,38 @@ aim_dim=10
 input_dim = sensor_dim+aim_dim+5
 output_dim = 12
 
-
+class DataCollector:
+    def __init__(self):
+        self.states = []
+        self.actions = []
+        self.rewards = []
+        self.next_states = []
+        self.dones = []
+ 
+    def add_transition(self, state, action, reward, next_state, done):
+        self.states.append(state)
+        self.actions.append(action)
+        self.rewards.append(reward)
+        self.next_states.append(next_state)
+        self.dones.append(done)
+ 
+    def get_transition_dict(self):
+        transition_dict = {
+            'states': torch.tensor(np.array(self.states), dtype=torch.float32),  # 转换为张量
+            'aim_states': torch.tensor(np.array(self.next_states), dtype=torch.float32),  # 转换为张量
+            'actions': torch.tensor(np.array(self.actions), dtype=torch.float32),  # 转换为张量
+            'rewards': torch.tensor(np.array(self.rewards), dtype=torch.float32),  # 转换为张量
+            'next_states': torch.tensor(np.array(self.next_states), dtype=torch.float32),  # 转换为张量
+            'dones': torch.tensor(np.array(self.dones), dtype=torch.float32)  # 转换为张量
+        }
+        return transition_dict
+    
+    def clear(self):
+        self.states = []
+        self.actions = []
+        self.rewards = []
+        self.next_states = []
+        self.dones = []
 
 # 定义一个执行器列表，用于表示机器人的不同关节
 actuators = [
@@ -49,7 +80,7 @@ sensors = [
 
 
 class RobotSimulation:
-    def __init__(self,xml_path,sensor_list, actuator_list,Model,device):
+    def __init__(self,xml_path=None,sensor_list=None, actuator_list=None,Model=None,device=None,DataCollector=None):
         
         self.device=device
         
@@ -72,9 +103,14 @@ class RobotSimulation:
         #执行器
         self.actuator_names = actuator_list
         self.actuator_ids = None
+        self.actions=None
 
         #状态
         self.state = None
+        
+        
+        #数据收集器
+        self.DataCollector=DataCollector
         
         #初始化
         self._get_sensor_init_()
@@ -101,14 +137,13 @@ class RobotSimulation:
         try:
             # 设置执行器的力矩
             state = self.state.float().to(self.device)  # 将状态移动到CUDA
-            actions = self.Model(state)  # 计算动作
-            print(actions)
+            self.actions = self.Model(state)  # 计算动作
             # 判断actions的长度是否为12, 异常处理
-            if actions.size(0) != 12:
+            if self.actions.size(0) != 12:
                 print("执行器力矩维度不正确")
                 return
             
-            actions = actions.cpu()  # 如果需要将actions移回到CPU
+            actions = self.actions.cpu()  # 如果需要将actions移回到CPU
             for actuator_id, torque in zip(self.actuator_ids, actions):
                 self.d.ctrl[actuator_id] = torque.item()  # 取出标量值并赋值
         except Exception as e:
@@ -150,9 +185,8 @@ class RobotSimulation:
         state_a = torch.cat([acc, gyro, ori], dim=0)
         state_b = torch.cat([self.vel,self.ang_vel, self.quat], dim=0)
         # 状态合并
-        self.state = torch.stack([state_a, state_b], dim=0).to(self.device)
-        
-        return self.state
+        self.next_state = torch.stack([state_a, state_b], dim=0).to(self.device)
+        return self.next_state  
     
     
     #-------------------#
@@ -182,6 +216,20 @@ class RobotSimulation:
     # # #工具函数
     # #-#
     
+    #采集数据
+    def collect_data(self):
+        
+        self.DataCollector.add_transition(self.state, self.actions, reward, self.next_state, done)
+        self.state = self.next_state.clone()
+        
+        
+    #reset
+    def reset(self):
+        mujoco.mj_resetData(self.m, self.d,0)
+        self.DataCollector.clear()
+    
+    
+    
     def do_random_action(self):
         # 随机动作
         actions = np.random.uniform(-2, 2, 12)
@@ -209,6 +257,8 @@ class RobotSimulation:
                 mujoco.mj_step(self.m, self.d)
 
                 self._get_state_().to(self.device)
+                
+                
 
                 with viewer.lock():
                     viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = int(self.d.time % 2)
@@ -218,6 +268,41 @@ class RobotSimulation:
                 if time_until_next_step > 0:
                     time.sleep(time_until_next_step) 
     
+    def Simulate_with_action(self,render=False):
+        
+        while True:
+            self._get_state_()
+            with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
+                while viewer.is_running():
+                    step_start = time.time()
+                    
+                    self.set_actuator_torque()
+                    
+                    mujoco.mj_step(self.m, self.d)
+
+                    self._get_state_().to(self.device)
+                    
+                    self.collect_data()
+
+
+                    with viewer.lock():
+                        viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = int(self.d.time % 2)
+
+                    viewer.sync()
+                    time_until_next_step = self.m.opt.timestep - (time.time() - step_start)
+                    if time_until_next_step > 0:
+                        time.sleep(time_until_next_step) 
+                    
+                    
+            #stop_event.wait()
+            
+            #train()
+            
+            self.reset()
+                    
+                    
+                    
+                    
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
