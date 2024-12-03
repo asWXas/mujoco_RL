@@ -6,8 +6,7 @@ import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import os
-import sys
+import json
 import threading
 
 # 当前状态  加速度(dim=3)  陀螺仪(dim=3)  四元数(dim=4)
@@ -27,6 +26,8 @@ class DataCollector:
         self.rewards = []
         self.next_states = []
         self.dones = []
+        #获取当前时间
+        self.time_stamp = None
  
     def add_transition(self, state, action, reward, next_state, done):
         self.states.append(state)
@@ -47,6 +48,20 @@ class DataCollector:
         return transition_dict
     
     def clear(self):
+        #将数据写入文件（self.time_stamp）,方便以后使用
+        self.time_stamp = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())
+        data = {
+        "states": self.states,
+        "actions": self.actions,
+        "rewards": self.rewards,
+        "next_states": self.next_states,
+        "dones": self.dones,
+        }
+        
+        file_name = f"data_{self.time_stamp}.json"
+        with open(file_name, 'w') as json_file:
+            json.dump(data, json_file, indent=4, ensure_ascii=False)
+        
         self.states = []
         self.actions = []
         self.rewards = []
@@ -74,13 +89,12 @@ sensors = [
     "accelerometer",
     "gyro",
     "orientation",
-    "camera_sensor"
 ]
 
 
 
 class RobotSimulation:
-    def __init__(self,xml_path=None,sensor_list=None, actuator_list=None,Model=None,device=None,DataCollector=None):
+    def __init__(self,xml_path=None,sensor_list=None, actuator_list=None,dataCollector=None,Model=None,device=None):
         
         self.device=device
         
@@ -107,10 +121,7 @@ class RobotSimulation:
 
         #状态
         self.state = None
-        
-        
-        #数据收集器
-        self.DataCollector=DataCollector
+        self.Collector=dataCollector
         
         #初始化
         self._get_sensor_init_()
@@ -136,7 +147,9 @@ class RobotSimulation:
     def set_actuator_torque(self):
         try:
             # 设置执行器的力矩
-            state = self.state.float().to(self.device)  # 将状态移动到CUDA
+
+            state = self.state.float().to(self.device)  # 将状态转为张量
+
             self.actions = self.Model(state)  # 计算动作
             # 判断actions的长度是否为12, 异常处理
             if self.actions.size(0) != 12:
@@ -146,6 +159,8 @@ class RobotSimulation:
             actions = self.actions.cpu()  # 如果需要将actions移回到CPU
             for actuator_id, torque in zip(self.actuator_ids, actions):
                 self.d.ctrl[actuator_id] = torque.item()  # 取出标量值并赋值
+            return actions , state
+            
         except Exception as e:
             print(f"设置执行器力矩时出现错误: {e}")
 
@@ -185,8 +200,8 @@ class RobotSimulation:
         state_a = torch.cat([acc, gyro, ori], dim=0)
         state_b = torch.cat([self.vel,self.ang_vel, self.quat], dim=0)
         # 状态合并
-        self.next_state = torch.stack([state_a, state_b], dim=0).to(self.device)
-        return self.next_state  
+        self.state = torch.stack([state_a, state_b], dim=0).to(self.device)
+        return self.state  
     
     
     #-------------------#
@@ -215,19 +230,11 @@ class RobotSimulation:
     # #---------------------#
     # # #工具函数
     # #-#
-    
-    #采集数据
-    def collect_data(self):
-        
-        self.DataCollector.add_transition(self.state, self.actions, reward, self.next_state, done)
-        self.state = self.next_state.clone()
-        
         
     #reset
     def reset(self):
         mujoco.mj_resetData(self.m, self.d,0)
         self.DataCollector.clear()
-    
     
     
     def do_random_action(self):
@@ -240,8 +247,7 @@ class RobotSimulation:
     #     """对张量进行填充，使其长度达到 target_length"""
     #     padding = target_length - tensor.size(0)
     #     return torch.cat([tensor, torch.zeros(padding)], dim=0)
-    
-    
+
     #---------------------#
     # #仿真
     #---------------------#
@@ -251,8 +257,7 @@ class RobotSimulation:
         with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
             while viewer.is_running():
                 step_start = time.time()
-                
-
+            
                 
                 mujoco.mj_step(self.m, self.d)
 
@@ -268,37 +273,55 @@ class RobotSimulation:
                 if time_until_next_step > 0:
                     time.sleep(time_until_next_step) 
     
+    
+    #---------------------#
+    # #train
+    #---------------------#
+    
     def Simulate_with_action(self,render=False):
-        
         while True:
-            self._get_state_()
+            self._get_state_().to(self.device)
+            done=False
+            i=0
             with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
-                while viewer.is_running():
+                while viewer.is_running() and done==False:
+                    
                     step_start = time.time()
                     
-                    self.set_actuator_torque()
+                    action , state = self.set_actuator_torque()
                     
                     mujoco.mj_step(self.m, self.d)
 
-                    self._get_state_().to(self.device)
+                    next_state = self._get_state_().to(self.device)
                     
-                    self.collect_data()
-
-
+                    
+                    
+                    self.Collector.add_transition(state, action, 0, next_state, done)
+                    
                     with viewer.lock():
                         viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = int(self.d.time % 2)
-
                     viewer.sync()
                     time_until_next_step = self.m.opt.timestep - (time.time() - step_start)
                     if time_until_next_step > 0:
                         time.sleep(time_until_next_step) 
-                    
-                    
-            #stop_event.wait()
+                        
+                    #解析状态，执行器力矩，得到下一状态
+                    i+=1
+                    if i>1000:
+                        done=True
             
-            #train()
             
-            self.reset()
+            
+            
+                  
+            print("XXXXXXXXXXXXXX")
+            self.Collector.clear()   
+                    
+            # #stop_event.wait()
+            
+            # #train()
+            
+            # self.reset()
                     
                     
                     
@@ -313,9 +336,9 @@ class PolicyNet(nn.Module):
         super(PolicyNet, self).__init__()
         self.action_layers =nn.Sequential(
             nn.LazyLinear(n_hiddens,device=device),
-            nn.ELU(),
+            nn.Tanh(),
             nn.Linear(n_hiddens, n_hiddens*2),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Linear(n_hiddens*2, n_hiddens),
             nn.Linear(n_hiddens, output_dim),
         )
@@ -329,8 +352,35 @@ class PolicyNet(nn.Module):
 #创建定时器
 
 
+class Agent:
+    def __init__(self,model_path,sensor_list,actuator_list,Model,device,DataCollector):
+        self.model_path=model_path
+        self.sensor_list=sensor_list
+        self.actuator_list=actuator_list
+        self.Model=Model
+        self.device=device
+        self.DataCollector=DataCollector
+        self.robosim=RobotSimulation(model_path,sensor_list,actuator_list,Model,device,DataCollector)
+        self.stop_event=threading.Event()
+        self.timer=threading.Timer(0.01,self.Simulate_with_action)
+        self.timer.start()
+        
+    def Simulate_with_action(self):
+        self.robosim.Simulate_with_action(render=True)
+        self.timer=threading.Timer(0.01,self.Simulate_with_action)
+        self.timer.start()
+        
+    def train(self):
+        pass
+    def stop(self):
+        self.stop_event.set()
+        self.timer.cancel()  # 停止定时器
+
+
+data=DataCollector()
+
 model=PolicyNet(64,12,device)
 model_path = "/home/wx/WorkSpeac/WorkSpeac/RL/rl/models/google_barkour_v0/scene.xml"
-robosim=RobotSimulation(model_path,sensors,actuators,Model=model,device=device)
+robosim=RobotSimulation(model_path,sensors,actuators,dataCollector=data,Model=model,device=device)
 robosim.set_trajectory(torch.tensor([1,0,0,0]),torch.tensor([0,0,0]),torch.tensor([0,0,0]))
-robosim.Simulate(render=True)
+robosim.Simulate_with_action(render=True)
