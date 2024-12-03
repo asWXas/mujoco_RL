@@ -47,26 +47,34 @@ class DataCollector:
         }
         return transition_dict
     
+
     def clear(self):
-        #将数据写入文件（self.time_stamp）,方便以后使用
+        # 创建文件名，假设 self.time_stamp 是一个有效的时间戳
         self.time_stamp = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())
-        data = {
-        "states": self.states,
-        "actions": self.actions,
-        "rewards": self.rewards,
-        "next_states": self.next_states,
-        "dones": self.dones,
-        }
-        
         file_name = f"data_{self.time_stamp}.json"
-        with open(file_name, 'w') as json_file:
-            json.dump(data, json_file, indent=4, ensure_ascii=False)
         
+        with open(file_name, 'w') as json_file:
+            # 一个一个地写入数据
+            for i in range(len(self.states)):
+                # 创建当前转移的数据字典
+                data = {
+                    "states": self.states[i].tolist() if isinstance(self.states[i], (list, torch.Tensor)) else self.states[i],
+                    "actions": self.actions[i].tolist() if isinstance(self.actions[i], (list, torch.Tensor)) else self.actions[i],
+                    "rewards": self.rewards[i],
+                    "next_states": self.next_states[i].tolist() if isinstance(self.next_states[i], (list, torch.Tensor)) else self.next_states[i],
+                    "dones": self.dones[i],
+                }
+                # 写入当前转移的数据，确保是逐个写入
+                json.dump(data, json_file, indent=4, ensure_ascii=False)
+                json_file.write('\n')  # 每个条目之间换行
+
+        # 清空数据
         self.states = []
         self.actions = []
         self.rewards = []
         self.next_states = []
         self.dones = []
+
 
 # 定义一个执行器列表，用于表示机器人的不同关节
 actuators = [
@@ -234,7 +242,7 @@ class RobotSimulation:
     #reset
     def reset(self):
         mujoco.mj_resetData(self.m, self.d,0)
-        self.DataCollector.clear()
+        self.Collector.clear()
     
     
     def do_random_action(self):
@@ -310,18 +318,18 @@ class RobotSimulation:
                     if i>1000:
                         done=True
             
+        
             
             
             
                   
             print("XXXXXXXXXXXXXX")
-            self.Collector.clear()   
+ 
                     
             # #stop_event.wait()
             
             # #train()
-            
-            # self.reset()
+            self.reset()
                     
                     
                     
