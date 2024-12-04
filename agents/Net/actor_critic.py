@@ -2,18 +2,6 @@ import torch
 import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
-
-# 定义模型的输入维度、输出维度和隐藏层维度
-input_dim = None
-output_dim = None
-hidden_dim = None
-
-states_type={
-    "senser_state",
-    "aim_state"
-}
-
-
 # ----------------------------------- #
 # 构建策略网络--actor
 # ----------------------------------- #
@@ -23,18 +11,17 @@ class PolicyNet(nn.Module):
         super(PolicyNet, self).__init__()
         self.action_layers =nn.Sequential(
             nn.LazyLinear(n_hiddens,device=device),
-            nn.ELU(),
+            nn.Tanh(),
             nn.Linear(n_hiddens, n_hiddens*2),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Linear(n_hiddens*2, n_hiddens),
             nn.Linear(n_hiddens, output_dim),
         )
         
     def forward(self, x):
-        x=x.float()
         output = self.action_layers(x)
-        actions = F.softsign(output)             
-        return actions[0][0]
+        actions = F.softsign(output)       
+        return actions[0]
     
 # ----------------------------------- #
 # 构建价值网络--critic
@@ -57,55 +44,7 @@ class ValueNet(nn.Module):
     
 
 
-#数据收集器
-class DataCollector:
-    def __init__(self):
-        self.states = []
-        self.actions = []
-        self.rewards = []
-        self.next_states = []
-        self.dones = []
- 
-    def add_transition(self, state, action, reward, next_state, done):
-        self.states.append(state)
-        self.actions.append(action)
-        self.rewards.append(reward)
-        self.next_states.append(next_state)
-        self.dones.append(done)
- 
-    def get_transition_dict(self):
-        transition_dict = {
-            'states': torch.tensor(np.array(self.states), dtype=torch.float32),  # 转换为张量
-            'aim_states': torch.tensor(np.array(self.next_states), dtype=torch.float32),  # 转换为张量
-            'actions': torch.tensor(np.array(self.actions), dtype=torch.float32),  # 转换为张量
-            'rewards': torch.tensor(np.array(self.rewards), dtype=torch.float32),  # 转换为张量
-            'next_states': torch.tensor(np.array(self.next_states), dtype=torch.float32),  # 转换为张量
-            'dones': torch.tensor(np.array(self.dones), dtype=torch.float32)  # 转换为张量
-        }
-        return transition_dict
-    
-    def clear(self):
-        self.states = []
-        self.actions = []
-        self.rewards = []
-        self.next_states = []
-        self.dones = []
 
-Collector = DataCollector()
-#假设已经收集好数据
-data_list = Collector.get_transition_dict()
-for data in data_list:
-    states=data['states']
-    aim_states=data['aim_states']
-    actions=data['actions']
-    rewards=data['rewards']
-    next_states=data['next_states']
-    dones=data['dones']
-    
-    #计算
-    #反响传播
-    #优化器更新参数
-    
     
 #----------------------------------- #
 # 4. 优势与回报计算模块
@@ -268,3 +207,9 @@ class PPO:
             # 梯度更新
             self.actor_optimizer.step()
             self.critic_optimizer.step()
+            
+            
+
+
+
+
