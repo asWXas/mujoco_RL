@@ -42,58 +42,34 @@ class RobotSimulation:
         self._get_sensor_init_()
         self._get_actuator_id_()
         
-        
-        
-    #-------------------#
-    # #执行器
-    #-------------------#
-    
-    def _get_actuator_id_(self):
+    def _get_actuator_id_(self):# 获取关节所有关节的ID
         try:
-            # 获取关节所有关节的ID
             self.actuator_ids = [mujoco.mj_name2id(self.m, mujoco.mjtObj.mjOBJ_ACTUATOR, name) for name in self.actuator_names]
         except Exception as e:
             print(f"获取关节ID时出现错误: {e}")
     
-    #-------------------#
-    # #设置执行器力矩
-    #-#
-    
-    def set_actuator_torque(self):
+    def set_actuator_torque(self):#设置执行器力矩
         try:
-            # 设置执行器的力矩
-
             state = self.state.float().to(self.device)  # 将状态转为张量
-
             self.actions = self.Model(state)  # 计算动作
             # 判断actions的长度是否为12, 异常处理
             if self.actions.size(0) != 12:
                 print("执行器力矩维度不正确")
                 return
-            
             actions = self.actions.cpu()  # 如果需要将actions移回到CPU
             for actuator_id, torque in zip(self.actuator_ids, actions):
                 self.d.ctrl[actuator_id] = torque.item()  # 取出标量值并赋值
             return actions , state
-            
         except Exception as e:
             print(f"设置执行器力矩时出现错误: {e}")
 
-
-    #-------------------#
-    # #设置目标参数
-    #-------------------#
-    def set_trajectory(self, quat, vel, ang_vel, other_params=None):
+    def set_trajectory(self, quat, vel, ang_vel, other_params=None):#设置轨迹
         self.quat = quat
         self.vel = vel
         self.ang_vel = ang_vel
         self.other_params = other_params
         
-    #-------------------#
-    # #传感器
-    #-------------------#
-    
-    def get_sensor_data(self):
+    def get_sensor_data(self):#获取传感器数据
         try:
             # 提取传感器数据
             sensor_data_list = [torch.tensor(self.d.sensordata[start_idx:start_idx+dim]) for start_idx, dim in zip(self.sensor_start_idxs, self.sensor_dims)]
@@ -105,11 +81,7 @@ class RobotSimulation:
             return None
         return acc, gyro, ori
     
-    #-------------------#
-    # #状态
-    #-#
-
-    def _get_state_(self):
+    def _get_state_(self):#获取状态
         #状态合并(两个维度：传感器数据和目标参数)
         acc, gyro, ori = self.get_sensor_data()#得到 加速度，角速度，四元素
         state_a = torch.cat([acc, gyro, ori], dim=0)
@@ -118,12 +90,7 @@ class RobotSimulation:
         self.state = torch.stack([state_a, state_b], dim=0).to(self.device)
         return self.state  
     
-    
-    #-------------------#
-    # #初始化
-    #-#
-    
-    def _get_sensor_init_(self):
+    def _get_sensor_init_(self):#传感器初始化
         start_idxs = []
         dims = []
         try:
@@ -142,25 +109,24 @@ class RobotSimulation:
         self.sensor_start_idxs = start_idxs
         self.sensor_dims = dims
          
-    # #---------------------#
-    # # #工具函数
-    # #-#
-        
-    #reset
-    def reset(self):
+    def reset(self):# 重置
         mujoco.mj_resetData(self.m, self.d,0)
         self.Collector.clear()
     
-    
-    def sim_fq(self,fq):
+    def sim_fq(self,fq):# 设置频率
         self.fq=fq
-    
     
     def do_random_action(self):
         # 随机动作
         actions = np.random.uniform(-2, 2, 12)
         for actuator_id, torque in zip(self.actuator_ids, actions):
             self.d.ctrl[actuator_id] = torque
+
+
+    def get_setp(self):# 奖励函数
+        done=False
+        reward = 0
+        return reward, done
 
     # def pad_to_length(self,tensor, target_length):
     #     """对张量进行填充，使其长度达到 target_length"""
@@ -170,19 +136,12 @@ class RobotSimulation:
     #---------------------#
     # #仿真
     #---------------------#
-    def Simulate(self,render=False):
-        self._get_state_()
-        i=0
+    def Simulate(self,render=False):#仿真
         with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
             while viewer.is_running():
                 step_start = time.time()
             
-                
                 mujoco.mj_step(self.m, self.d)
-
-                self._get_state_().to(self.device)
-                
-                
 
                 with viewer.lock():
                     viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = int(self.d.time % 2)
@@ -197,24 +156,24 @@ class RobotSimulation:
     # #train
     #---------------------#
     
-    def Simulate_with_action(self,render=False):
+    def Simulate_with_action(self,render=False):#训练
         i=0
         while True:
             self._get_state_().to(self.device)
             done=False
-            i=0
             with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
                 while viewer.is_running() and done==False:
                     
                     step_start = time.time()
                     
-                    
+                    #频率控制
                     if i==0:
                         action , state = self.set_actuator_torque()
                         mujoco.mj_step(self.m, self.d)
                         next_state = self._get_state_().to(self.device)
-                        i=10
-                        self.Collector.add_transition(state, action, 0, next_state, done)
+                        reward, done = self.get_setp()
+                        self.Collector.add_transition(state, action, reward, next_state, done)
+                        i=self.fq
                         print("XXXXXXXXXXXXXX")
                     else:
                         mujoco.mj_step(self.m, self.d)
@@ -227,7 +186,7 @@ class RobotSimulation:
                     if time_until_next_step > 0:
                         time.sleep(time_until_next_step) 
                         
-                    #解析状态，执行器力矩，得到下一状态
+
             print("XXXXXXXXXXXXXX")
  
                     

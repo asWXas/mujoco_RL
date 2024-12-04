@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from agents.actor_critic import *
+from Net.actor_critic import *
 
 
  
