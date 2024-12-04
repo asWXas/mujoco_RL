@@ -5,9 +5,40 @@ import numpy as np
 import time
 
 
+import sys
+from pathlib import Path
+sys.path.append(Path(r'./').as_posix())
+
+from agents.Net.actor_critic import *
+from agents.Net.dataColl import *
+from agents.algos.model import *
+
+actuators = [
+    "abduction_front_left",
+    "hip_front_left",
+    "knee_front_left",
+    "abduction_hind_left",
+    "hip_hind_left",
+    "knee_hind_left",
+    "abduction_front_right",
+    "hip_front_right",
+    "knee_front_right",
+    "abduction_hind_right",
+    "hip_hind_right",
+    "knee_hind_right"
+]
+
+
+sensors = [
+    "accelerometer",
+    "gyro",
+    "orientation",
+]
+
+
 class RobotSimulation:
-    def __init__(self,xml_path=None,sensor_list=None, actuator_list=None,dataCollector=None,Model=None):
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    def __init__(self,xml_path=None,sensor_list=None, actuator_list=None,dataCollector=None,Model=None,device=None):
+
         self.device=device
         
         self.m= mujoco.MjModel.from_xml_path(xml_path)
@@ -133,9 +164,6 @@ class RobotSimulation:
     #     padding = target_length - tensor.size(0)
     #     return torch.cat([tensor, torch.zeros(padding)], dim=0)
 
-    #---------------------#
-    # #仿真
-    #---------------------#
     def Simulate(self,render=False):#仿真
         with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
             while viewer.is_running():
@@ -150,11 +178,6 @@ class RobotSimulation:
                 time_until_next_step = self.m.opt.timestep - (time.time() - step_start)
                 if time_until_next_step > 0:
                     time.sleep(time_until_next_step) 
-    
-    
-    #---------------------#
-    # #train
-    #---------------------#
     
     def Simulate_with_action(self,render=False):#训练
         i=0
@@ -198,13 +221,12 @@ class RobotSimulation:
                     
 
 
+data=DataCollector()
+device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model=PolicyNet(64,12,device)
 
-# data=DataCollector()
 
-# model=PolicyNet(64,12,device)
-
-
-# model_path = "/home/wx/WorkSpeac/WorkSpeac/RL/rl/models/google_barkour_v0/scene.xml"
-# robosim=RobotSimulation(model_path,sensors,actuators,dataCollector=data,Model=model,device=device)
-# robosim.set_trajectory(torch.tensor([1,0,0,0]),torch.tensor([0,0,0]),torch.tensor([0,0,0]))
-# robosim.Simulate_with_action(render=True)
+model_path = "/home/wx/WorkSpeac/WorkSpeac/RL/rl/environments/models/google_barkour_v0/scene.xml"
+robosim=RobotSimulation(model_path,sensors,actuators,dataCollector=data,Model=model,device=device)
+robosim.set_trajectory(torch.tensor([1,0,0,0]),torch.tensor([0,0,0]),torch.tensor([0,0,0]))
+robosim.Simulate(render=True)
