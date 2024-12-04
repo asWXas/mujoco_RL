@@ -68,6 +68,8 @@ class RobotSimulation:
         
         #频率
         self.fq=10
+        #步长
+        self.len=10
         
         #初始化
         self._get_sensor_init_()
@@ -141,11 +143,12 @@ class RobotSimulation:
         self.sensor_dims = dims
          
     def reset(self):# 重置
-        mujoco.mj_resetData(self.m, self.d,0)
+        # mujoco.mj_resetData(self.m, self.d)
         self.Collector.clear()
     
-    def sim_fq(self,fq):# 设置频率
+    def sim_fq(self,fq,len):# 设置频率
         self.fq=fq
+        self.len=len
     
     def do_random_action(self):
         # 随机动作
@@ -179,35 +182,46 @@ class RobotSimulation:
                 if time_until_next_step > 0:
                     time.sleep(time_until_next_step) 
     
-    def Simulate_with_action(self,render=False):#训练
-        i=0
+    def Simulate_train(self,render=False):#训练
         while True:
             self._get_state_().to(self.device)
             done=False
+            hz=0
+            setp=0
             with mujoco.viewer.launch_passive(self.m, self.d) as viewer:
-                while viewer.is_running() and done==False:
+                while viewer.is_running() and setp<self.len:
                     
                     step_start = time.time()
                     
+                    
                     #频率控制
-                    if i==0:
+                    if hz<self.fq:
+                        
+                        mujoco.mj_step(self.m, self.d)
+                        hz+=1
+
+                    else:
                         action , state = self.set_actuator_torque()
                         mujoco.mj_step(self.m, self.d)
                         next_state = self._get_state_().to(self.device)
                         reward, done = self.get_setp()
                         self.Collector.add_transition(state, action, reward, next_state, done)
                         i=self.fq
-                        print("XXXXXXXXXXXXXX")
-                    else:
-                        mujoco.mj_step(self.m, self.d)
-                        i-=1
-                        
+                        setp=1
+                        hz=0
+                    
+                    
+                    
                     with viewer.lock():
                         viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = int(self.d.time % 2)
                     viewer.sync()
                     time_until_next_step = self.m.opt.timestep - (time.time() - step_start)
                     if time_until_next_step > 0:
                         time.sleep(time_until_next_step) 
+                    if done:
+                        mujoco.mj_resetData(self.m, self.d)
+                        
+                        
                         
 
             print("XXXXXXXXXXXXXX")
@@ -216,17 +230,11 @@ class RobotSimulation:
             # #stop_event.wait()
             
             # #train()
+            
+            
+            
             self.reset()
                     
                     
 
 
-data=DataCollector()
-device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model=PolicyNet(64,12,device)
-
-
-model_path = "/home/wx/WorkSpeac/WorkSpeac/RL/rl/environments/models/google_barkour_v0/scene.xml"
-robosim=RobotSimulation(model_path,sensors,actuators,dataCollector=data,Model=model,device=device)
-robosim.set_trajectory(torch.tensor([1,0,0,0]),torch.tensor([0,0,0]),torch.tensor([0,0,0]))
-robosim.Simulate(render=True)
