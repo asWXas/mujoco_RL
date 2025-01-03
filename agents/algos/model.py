@@ -97,3 +97,200 @@ class PPO:
             # 梯度更新
             self.actor_optimizer.step()
             self.critic_optimizer.step()
+
+
+
+#测试ACT
+
+
+# import torch
+# import torch.nn as nn
+# import torch.optim as optim
+# import numpy as np
+# from torch.distributions import Normal
+
+# # 定义 Transformer 编码器
+# class TransformerEncoder(nn.Module):
+#     # Transformer编码器类，继承自nn.Module
+#     def __init__(self, input_dim, hidden_dim, num_layers, num_heads):
+#         # 初始化函数，定义Transformer编码器的结构
+#         super(TransformerEncoder, self).__init__()
+#         self.embedding = nn.Linear(input_dim, hidden_dim)  # 线性嵌入层，将输入维度映射到隐藏维度
+#         encoder_layer = nn.TransformerEncoderLayer(
+#             d_model=hidden_dim,  # 隐藏维度
+#             nhead=num_heads,  # 多头注意力机制的头数
+#             dim_feedforward=hidden_dim * 4  # 前馈网络的维度
+#         )
+#         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)  # Transformer编码器
+
+#     def forward(self, x):
+#         # 前向传播函数，定义数据通过编码器的流程
+#         x = self.embedding(x)  # 将输入数据通过嵌入层
+#         x = self.transformer(x)  # 将嵌入后的数据通过Transformer编码器
+#         return x  # 返回编码后的数据
+
+# # 定义 ACT 策略网络
+# class ACT(nn.Module):
+#     # ACT 类，用于实现基于 Transformer 的动作生成模型
+#     def __init__(self, state_dim, action_dim, chunk_size, hidden_dim, num_layers, num_heads):
+#         # 初始化 ACT 类
+#         # state_dim: 状态维度
+#         # action_dim: 动作维度
+#         # chunk_size: 动作块大小
+#         # hidden_dim: 隐藏层维度
+#         # num_layers: Transformer 编码器层数
+#         # num_heads: Transformer 多头注意力机制的头数
+#         super(ACT, self).__init__()
+#         # 初始化Transformer编码器，用于处理状态信息
+#         self.transformer_encoder = TransformerEncoder(state_dim, hidden_dim, num_layers, num_heads)
+#         # 初始化动作解码器，将隐藏层的输出映射到动作空间
+#         self.action_decoder = nn.Linear(hidden_dim, action_dim * chunk_size)
+#         # 设置每个时间步的动作块大小
+#         self.chunk_size = chunk_size
+#         # 设置动作空间的维度
+#         self.action_dim = action_dim
+#     def forward(self, state):
+#         # 前向传播函数
+#         # state: 输入状态
+#         # 返回生成的动作块
+#         encoded_state = self.transformer_encoder(state)
+#         action_chunk = self.action_decoder(encoded_state[-1])
+#         actions = action_chunk.view(-1, self.chunk_size, self.action_dim)
+#         return actions
+
+# # 定义值函数网络
+# class ValueNetwork(nn.Module):
+#     def __init__(self, state_dim, hidden_dim):
+#         super(ValueNetwork, self).__init__()
+#         self.fc1 = nn.Linear(state_dim, hidden_dim)
+#         self.fc2 = nn.Linear(hidden_dim, 1)
+
+#     def forward(self, state):
+#         x = torch.relu(self.fc1(state))
+#         value = self.fc2(x)
+#         return value
+
+# # 定义 PPO 算法
+# class PPO:
+#     def __init__(self, policy, value_net, optimizer, clip_epsilon=0.2, value_coef=0.5, entropy_coef=0.01):
+#         self.policy = policy
+#         self.value_net = value_net
+#         self.optimizer = optimizer
+#         self.clip_epsilon = clip_epsilon
+#         self.value_coef = value_coef
+#         self.entropy_coef = entropy_coef
+
+#     def update(self, states, actions, rewards, old_log_probs, advantages):
+#         # 计算新策略的动作概率
+#         new_actions = self.policy(states)
+#         dist = Normal(new_actions, torch.ones_like(new_actions))
+#         new_log_probs = dist.log_prob(actions)
+
+#         # 计算 PPO 损失
+#         ratio = (new_log_probs - old_log_probs).exp()
+#         surr1 = ratio * advantages
+#         surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * advantages
+#         policy_loss = -torch.min(surr1, surr2).mean()
+
+#         # 计算值函数损失
+#         values = self.value_net(states)
+#         value_loss = nn.MSELoss()(values, rewards)
+
+#         # 计算熵正则化
+#         entropy_loss = -dist.entropy().mean()
+
+#         # 总损失
+#         loss = policy_loss + self.value_coef * value_loss + self.entropy_coef * entropy_loss
+
+#         # 更新参数
+#         self.optimizer.zero_grad()
+#         loss.backward()
+#         self.optimizer.step()
+
+
+# def train_ppo_act(env, policy, value_net, optimizer, epochs=100, max_steps=1000, gamma=0.99, lam=0.95):
+#     ppo = PPO(policy, value_net, optimizer)
+#     for epoch in range(epochs):
+#         states, actions, rewards, old_log_probs, values, advantages = [], [], [], [], [], []
+#         state = env.reset()
+#         for step in range(max_steps):
+#             # 生成动作
+#             state_tensor = torch.FloatTensor(state).unsqueeze(0)
+#             action_chunk = policy(state_tensor)
+#             dist = Normal(action_chunk, torch.ones_like(action_chunk))
+#             action = dist.sample()
+#             log_prob = dist.log_prob(action)
+
+#             # 执行动作
+#             next_state, reward, done, _ = env.step(action.squeeze().numpy())
+
+#             # 计算值函数
+#             value = value_net(state_tensor)
+
+#             # 存储数据
+#             states.append(state)
+#             actions.append(action)
+#             rewards.append(reward)
+#             old_log_probs.append(log_prob)
+#             values.append(value)
+
+#             state = next_state
+#             if done:
+#                 break
+
+#         # 计算优势函数
+#         rewards = np.array(rewards)
+#         values = torch.cat(values).squeeze().detach().numpy()
+#         advantages = []
+#         gae = 0
+#         for t in reversed(range(len(rewards))):
+#             delta = rewards[t] + gamma * values[t + 1] - values[t]
+#             gae = delta + gamma * lam * gae
+#             advantages.insert(0, gae)
+#         advantages = torch.FloatTensor(advantages)
+
+#         # 更新策略
+#         ppo.update(
+#             torch.FloatTensor(np.array(states)),
+#             torch.cat(actions),
+#             torch.FloatTensor(rewards),
+#             torch.cat(old_log_probs),
+#             advantages,
+#         )
+#         print(f"Epoch [{epoch+1}/{epochs}], Steps: {step+1}")
+
+# # Environment
+# class DummyEnv:
+#     def __init__(self, state_dim, action_dim):
+#         self.state_dim = state_dim
+#         self.action_dim = action_dim
+
+#     def reset(self):
+#         pass
+
+#     def step(self, action):
+#         pass
+
+# # 参数设置
+# state_dim = 8
+# action_dim = 4
+# chunk_size = 5
+# hidden_dim = 64
+# num_layers = 2
+# num_heads = 4
+
+# # 初始化模型和环境
+# policy = ACT(state_dim, action_dim, chunk_size, hidden_dim, num_layers, num_heads)
+# value_net = ValueNetwork(state_dim, hidden_dim)
+# optimizer = optim.Adam(list(policy.parameters()) + list(value_net.parameters()), lr=1e-3)
+# env = DummyEnv(state_dim, action_dim)
+
+# # 训练模型
+# train_ppo_act(env, policy, value_net, optimizer, epochs=100)
+
+
+
+
+
+
+
